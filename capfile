@@ -1,0 +1,169 @@
+load 'deploy' if respond_to?(:namespace) # cap2 differentiator
+load 'config/deploy.rb'
+require 'capistrano/ext/multistage'
+
+# Get rid of the rails-specific features
+require 'railsless-deploy'
+
+# Here we setup the shared files directory
+after 'deploy:finalize_update', 'drupal:finalize_update'
+
+# After symlinking the code we symlink the shared dirs
+after 'deploy:symlink', 'drupal:symlink'
+after 'deploy:symlink', 'stage_tasks:symlink'
+after "deploy", "drupal:cacheclear"
+
+# Allow stage-specific tasks to be run. e.g. Put site into main mode if dev or
+# stag stage
+after "deploy", "stage_tasks:cleanup"
+
+# Cleanup extra database dumps
+after "deploy:cleanup", "drupal:cleanup"
+
+after "deploy:setup", "drupal:setup"
+
+# Set group on all files added in the build process<D-0>
+before 'deploy:restart', 'drupal:set_group'
+
+# Override default Cap deploy task
+namespace :deploy do
+  # adjusted finalize_update, removed non rails stuff
+  task :finalize_update, :except => { :no_release => true } do
+    run "chmod -R g+w #{latest_release}" if fetch(:group_writable, true)
+  end
+end
+
+# Drupal=specific tasks
+namespace :drupal do
+  task :finalize_update, :except => { :no_release => true } do
+    # Locate the make file and run it
+    run "ls #{latest_release} | grep make" do |channel, stream, data|
+      run "cd #{latest_release}; #{drush} make #{data} ."
+    end
+  end
+
+  # Rotate out old backups
+  # If you want to keep more/less, you can specify this like:
+  # cap staging deploy:cleanup -s keep_releases=10
+  task :cleanup do
+    count_backups = db_backup_files.size
+    count_releases = count = fetch(:keep_releases, 5).to_i
+    old_backups = db_backup_files.slice(count_releases, count_backups)
+    if old_backups 
+      old_backups.each { |file| run "rm #{db_backup_dir}/#{file};" }
+    end
+  end
+
+  # Symlink shared directories
+  task :symlink, :except => { :no_release => true } do
+    run "ln -s #{shared_path}/default/files #{latest_release}/sites/default/files"
+    run "ln -s #{shared_path}/default/settings.php #{latest_release}/sites/default/settings.php"
+  end
+
+  # Enforce use of a particular group
+  task :set_group, :except => { :no_release => true } do
+    # Parent folders should have had the sticky group id set, but just in case
+    # they haven't, ensure the group is set
+    run "chgrp -R #{group} #{deploy_to}/current"
+    run "chgrp -R #{group} #{latest_release}"
+  end
+
+  # Drush cache clear
+  task :cacheclear , :except => { :no_release => true } do
+    "#{drush} cc all"
+  end
+
+  # Safely runs update.php via drush.  Provides a fallback option via the
+  # db_refresh_hot_spare command.
+  task :update_db, :except => { :no_release => true } do
+    # Remove cache before dumping in order to minimize dump size
+    cacheclear
+    # Take a snapshot of the live db
+    db_backup_live
+    # Sync this snapshot to the hot spare
+    db_refresh_hot_spare
+    # Set active site to offline
+    offline
+    # Ok, run update.php
+    run "#{drush} --verbose --yes updatedb"
+    response = Capistrano::CLI.ui.ask "Did the database update go according to plan (take a look at your website)? [Yes/No] (default is Yes) :"
+    response = response.empty? ? "Yes" : response
+    if response == "Yes"
+      online
+      cacheclear
+      logger.info "Groovy, taking the site out of maintenance mode."
+    else
+      logger.info "Awe Snap, reverting to the hot spare that was just created for you."
+      spare = db_settings_spare
+      run "rm #{shared_path}/default/db_settings.json"
+      run "ln -s #{spare} #{shared_path}/default/db_settings.json"
+    end
+  end
+
+  # Take site out of maintenance mode
+  task :online do
+    run "#{drush} vset --yes site_offline 0"
+  end
+
+  # Put site into maintenance mode
+  task :offline do
+    run "#{drush} vset --yes site_offline 1"
+  end
+
+  # Show which of the two databases is live at the moment
+  task :db_live? do
+    run "cat #{shared_path}/default/db_settings.json" do |channel, stream, data|
+      creds = JSON.parse(data)
+      db_name = creds['database']
+      logger.info "Current Live Database for \"#{application}\" is \"#{db_name}\""
+    end
+  end
+
+  # Take an arbitrary snapshot of the db
+  task :db_backup_live, :roles => :db, :except => { :no_release => true } do
+    # Ensure this path exists
+    time = Time.now.to_i
+    backup_file = "#{db_backup_dir}/#{current_release_stamp}_#{time}.sql"
+    run "cat #{db_settings_spare}" do |channel, stream, data|
+      creds = JSON.parse(data)
+      db_user = creds['username']
+      db_pass = creds['pass']
+      db_name = creds['database']
+      run "mysqldump --user=#{db_user} --password=#{db_pass} #{db_name} > #{backup_file}"
+      # In case group bit not set on parent directory
+      run "chgrp #{group} #{backup_file}"
+    end
+  end
+
+  # Get the most recent backup for this release and import it into the 
+  # non-live spare database
+  task :db_refresh_hot_spare, :roles => :db, :except => { :no_release => true } do
+    latest_backup = db_backup_files[0]
+    if !latest_backup
+      abort "No backup file available for this release."
+    end
+    run "cat #{db_settings_live}" do |channel, stream, data|
+      creds = JSON.parse(data)
+      db_user = creds['username']
+      db_pass = creds['pass']
+      db_name = creds['database']
+      run "mysql --user=#{db_user} --password=#{db_pass} --execute=\" DROP DATABASE #{db_name}\";"
+      run "mysql --user=#{db_user} --password=#{db_pass} --execute=\" CREATE DATABASE #{db_name}\";"
+      run "mysql --user=#{db_user} --password=#{db_pass} #{db_name} < #{db_backup_dir}/#{latest_backup}"
+    end
+  end
+
+  task :setup do
+    run "mkdir #{shared_path}/conf"
+    run "mkdir #{shared_path}/default"
+    db = {
+      'username' => 'put_username_here',
+      'pass' => 'put_pass_here',
+      'database' => 'your_database_1',
+      'database_spare' => 'your_database_2',
+    }
+    json = JSON.generate(db)
+    run "echo #{json} > #{shared_path}/conf/db_settings_1.json"
+    run "echo #{json} > #{shared_path}/conf/db_settings_2.json"
+  end
+end
