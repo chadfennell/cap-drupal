@@ -18,7 +18,7 @@ after "deploy", "drupal:cacheclear"
 after "deploy", "stage_tasks:cleanup"
 
 # Cleanup extra database dumps
-after "deploy:cleanup", "drupal:cleanup"
+after "deploy:cleanup", "drupal:db_cleanup"
 
 after "deploy:setup", "drupal:setup"
 
@@ -28,14 +28,14 @@ before 'deploy:restart', 'drupal:set_group'
 # Override default Cap deploy task
 namespace :deploy do
   # adjusted finalize_update, removed non rails stuff
-  task :finalize_update, :except => { :no_release => true } do
+  task :finalize_update, :roles => :web, :except => { :no_release => true } do
     run "chmod -R g+w #{latest_release}" if fetch(:group_writable, true)
   end
 end
 
 # Drupal=specific tasks
 namespace :drupal do
-  task :finalize_update, :except => { :no_release => true } do
+  task :finalize_update, :roles => :web, :except => { :no_release => true } do
     # Locate the make file and run it
     run "ls #{latest_release} | grep make" do |channel, stream, data|
       run "cd #{latest_release}; #{drush} make #{data} ."
@@ -45,23 +45,23 @@ namespace :drupal do
   # Rotate out old backups
   # If you want to keep more/less, you can specify this like:
   # cap staging deploy:cleanup -s keep_releases=10
-  task :cleanup do
+  task :db_cleanup, :roles => :db do
     count_backups = db_backup_files.size
     count_releases = count = fetch(:keep_releases, 5).to_i
     old_backups = db_backup_files.slice(count_releases, count_backups)
-    if old_backups 
+    if old_backups
       old_backups.each { |file| run "rm #{db_backup_dir}/#{file};" }
     end
   end
 
   # Symlink shared directories
-  task :symlink, :except => { :no_release => true } do
+  task :symlink, :roles => :web, :except => { :no_release => true } do
     run "ln -s #{shared_path}/default/files #{latest_release}/sites/default/files"
     run "ln -s #{shared_path}/default/settings.php #{latest_release}/sites/default/settings.php"
   end
 
   # Enforce use of a particular group
-  task :set_group, :except => { :no_release => true } do
+  task :set_group, :roles => :web, :except => { :no_release => true } do
     # Parent folders should have had the sticky group id set, but just in case
     # they haven't, ensure the group is set
     run "chgrp -R #{group} #{deploy_to}/current"
@@ -69,13 +69,13 @@ namespace :drupal do
   end
 
   # Drush cache clear
-  task :cacheclear , :except => { :no_release => true } do
+  task :cacheclear, :roles => :web, :except => { :no_release => true } do
     "#{drush} cc all"
   end
 
   # Safely runs update.php via drush.  Provides a fallback option via the
   # db_refresh_hot_spare command.
-  task :update_db, :except => { :no_release => true } do
+  task :updatedb, :roles => :web, :except => { :no_release => true } do
     # Remove cache before dumping in order to minimize dump size
     cacheclear
     # Take a snapshot of the live db
@@ -94,10 +94,18 @@ namespace :drupal do
       logger.info "Groovy, taking the site out of maintenance mode."
     else
       logger.info "Awe Snap, reverting to the hot spare that was just created for you."
-      spare = db_settings_spare
-      run "rm #{shared_path}/default/db_settings.json"
-      run "ln -s #{spare} #{shared_path}/default/db_settings.json"
+      db_revert_to_spare
     end
+  end
+
+  # Roll back to the hot spare
+  # Don't call this unless you know what you are doing
+  task :db_revert_to_spare, :roles => :web do
+    # Set database and other settings to the web server
+    init_web_role_settings
+    spare = db_settings_live['database_spare']
+    run "rm #{shared_path}/default/db_settings.json"
+    run "ln -s #{shared_path}/conf/#{spare} #{shared_path}/default/db_settings.json"
   end
 
   # Take site out of maintenance mode
@@ -120,40 +128,56 @@ namespace :drupal do
   end
 
   # Take an arbitrary snapshot of the db
-  task :db_backup_live, :roles => :db, :except => { :no_release => true } do
+  task :db_backup_live, :roles => :db do
+    # Set database and other settings to the web server
+    init_web_role_settings
     # Ensure this path exists
     time = Time.now.to_i
+    # Set the current release from the web server
     backup_file = "#{db_backup_dir}/#{current_release_stamp}_#{time}.sql"
-    run "cat #{db_settings_spare}" do |channel, stream, data|
-      creds = JSON.parse(data)
-      db_user = creds['username']
-      db_pass = creds['pass']
-      db_name = creds['database']
-      run "mysqldump --user=#{db_user} --password=#{db_pass} #{db_name} > #{backup_file}"
-      # In case group bit not set on parent directory
-      run "chgrp #{group} #{backup_file}"
-    end
+    db_user = db_settings_live['username']
+    db_pass = db_settings_live['pass']
+    db_name = db_settings_live['database']
+    run "mysqldump --user=#{db_user} --password=#{db_pass} #{db_name} > #{backup_file}"
+    # In case group bit not set on parent directory
+    run "chgrp #{group} #{backup_file}"
   end
 
   # Get the most recent backup for this release and import it into the 
   # non-live spare database
-  task :db_refresh_hot_spare, :roles => :db, :except => { :no_release => true } do
+  task :db_refresh_hot_spare, :roles => :db do
+    # Set database and other settings to the web server
+    init_web_role_settings
     latest_backup = db_backup_files[0]
     if !latest_backup
       abort "No backup file available for this release."
     end
-    run "cat #{db_settings_live}" do |channel, stream, data|
-      creds = JSON.parse(data)
-      db_user = creds['username']
-      db_pass = creds['pass']
-      db_name = creds['database']
-      run "mysql --user=#{db_user} --password=#{db_pass} --execute=\" DROP DATABASE #{db_name}\";"
-      run "mysql --user=#{db_user} --password=#{db_pass} --execute=\" CREATE DATABASE #{db_name}\";"
-      run "mysql --user=#{db_user} --password=#{db_pass} #{db_name} < #{db_backup_dir}/#{latest_backup}"
-    end
+    db_user = db_settings_spare['username']
+    db_pass = db_settings_spare['pass']
+    db_name = db_settings_spare['database']
+    run "mysql --user=#{db_user} --password=#{db_pass} --execute=\" DROP DATABASE #{db_name}\";"
+    run "mysql --user=#{db_user} --password=#{db_pass} --execute=\" CREATE DATABASE #{db_name}\";"
+    run "mysql --user=#{db_user} --password=#{db_pass} #{db_name} < #{db_backup_dir}/#{latest_backup}"
   end
 
-  task :setup do
+  # We always want to get certain information from the web role
+  task :init_web_role_settings, :roles => :web do
+    # Database settings
+    run "cat #{shared_path}/default/db_settings.json" do |channel, stream, data|
+      puts info = JSON.parse(data)
+      _cset(:db_settings_live) { info }
+      db_spare = File.join(db_conf_dir, info["database_spare"])
+      run "cat #{db_spare}" do |channel, stream, data|
+         _cset(:db_settings_spare) { JSON.parse(data) }
+      end
+    end
+    # Get the current release from the web role
+    release = current_release
+    _cset(:current_release_stamp) { release.split("/").pop }
+  end
+
+  # Setup tasks
+  task :setup, :roles => :web do
     run "mkdir #{shared_path}/conf"
     run "mkdir #{shared_path}/default"
     db = {
