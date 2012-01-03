@@ -25,6 +25,9 @@ after "deploy:setup", "drupal:setup"
 # Set group on all files added in the build process<D-0>
 before 'deploy:restart', 'drupal:set_group'
 
+# Call the core cap rollback 
+after "drupal:rollback", "deploy:rollback"
+
 # Override default Cap deploy task
 namespace :deploy do
   # adjusted finalize_update, removed non rails stuff
@@ -98,6 +101,10 @@ namespace :drupal do
     end
   end
 
+  task :rollback, :roles => :web, :except => { :no_release => true } do 
+    db_revert_to_spare
+  end
+
   # Roll back to the hot spare
   # Don't call this unless you know what you are doing
   task :db_revert_to_spare, :roles => :web do
@@ -111,11 +118,13 @@ namespace :drupal do
   # Take site out of maintenance mode
   task :online do
     run "#{drush} vset --yes site_offline 0"
+    cacheclear
   end
 
   # Put site into maintenance mode
   task :offline do
     run "#{drush} vset --yes site_offline 1"
+    cacheclear
   end
 
   # Show which of the two databases is live at the moment
