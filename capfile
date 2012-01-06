@@ -41,7 +41,7 @@ namespace :drupal do
   task :finalize_update, :roles => :web, :except => { :no_release => true } do
     # Locate the make file and run it
     run "ls #{latest_release} | grep make" do |channel, stream, data|
-      run "cd #{latest_release}; #{drush} make #{data} ."
+      run "cd #{latest_release}; #{drush} make --working-copy #{data} ."
     end
   end
 
@@ -73,7 +73,7 @@ namespace :drupal do
 
   # Drush cache clear
   task :cacheclear, :roles => :web, :except => { :no_release => true } do
-    "#{drush} cc all"
+    run "#{drush} cc all"
   end
 
   # Safely runs update.php via drush.  Provides a fallback option via the
