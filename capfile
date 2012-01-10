@@ -81,12 +81,12 @@ namespace :drupal do
   task :updatedb, :roles => :web, :except => { :no_release => true } do
     # Remove cache before dumping in order to minimize dump size
     cacheclear
+    # Set active site to offline
+    offline 
     # Take a snapshot of the live db
     db_backup_live
     # Sync this snapshot to the hot spare
     db_refresh_hot_spare
-    # Set active site to offline
-    offline
     # Ok, run update.php
     run "#{drush} --verbose --yes updatedb"
     response = Capistrano::CLI.ui.ask "Did the database update go according to plan (take a look at your website)? [Yes/No] (default is Yes) :"
