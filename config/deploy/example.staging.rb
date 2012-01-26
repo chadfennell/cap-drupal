@@ -16,6 +16,10 @@ set :application, "your.appname"
 # Point your apache web root to this directory for this app
 set :deploy_to, "/path/to/your/app/#{application}"
 
+# Where to put downloaded files on your local machine.
+# No trailing slash!
+set :local_backup_dir, "/path/to/your/local/machine/backup/dir"
+
 # Linux user and group settings
 set :user, "username_here"
 set :group, "group_here"

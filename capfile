@@ -34,7 +34,7 @@ namespace :deploy do
   task :finalize_update, :roles => :web, :except => { :no_release => true } do
     run "chmod -R g+w #{latest_release}" if fetch(:group_writable, true)
   end
-end
+ end
 
 # Drupal=specific tasks
 namespace :drupal do
@@ -198,5 +198,15 @@ namespace :drupal do
     json = JSON.generate(db)
     run "echo #{json} > #{shared_path}/conf/db_settings_1.json"
     run "echo #{json} > #{shared_path}/conf/db_settings_2.json"
+  end
+
+  # Download the latest live db backup
+  task :download_db, :roles => :db do
+    init_web_role_settings
+    latest_backup = db_backup_files[0]
+    if !latest_backup
+      abort "No backup file available for this release."
+    end
+    download("#{db_backup_dir}/#{latest_backup}", "#{local_backup_dir}/$CAPISTRANO:HOST$_#{application}_#{latest_backup}")
   end
 end
