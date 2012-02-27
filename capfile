@@ -38,6 +38,7 @@ namespace :deploy do
 
 # Drupal=specific tasks
 namespace :drupal do
+
   task :finalize_update, :roles => :web, :except => { :no_release => true } do
     # Locate the make file and run it
     run "ls #{latest_release} | grep make" do |channel, stream, data|
@@ -111,6 +112,10 @@ namespace :drupal do
     # Set database and other settings to the web server
     init_web_role_settings
     spare = db_settings_live['database_spare']
+    run "cat #{shared_path}/conf/#{spare}" do |channel, stream, data|
+      time = Time.now.to_i
+      caplog('dblog.log', "#{time} \\| #{data}")
+    end
     run "rm #{shared_path}/default/db_settings.json"
     run "ln -s #{shared_path}/conf/#{spare} #{shared_path}/default/db_settings.json"
   end
@@ -210,3 +215,11 @@ namespace :drupal do
     download("#{db_backup_dir}/#{latest_backup}", "#{local_backup_dir}/$CAPISTRANO:HOST$_#{application}_#{latest_backup}")
   end
 end
+
+# Simple helper function for basic logging
+def caplog(logfile, message)
+    log = "#{shared_path}/log/#{logfile}"
+    run "(test -e #{log} || touch #{log} && chmod 666 #{log}) && " +
+    "echo #{message} >> #{log};"
+end
+
