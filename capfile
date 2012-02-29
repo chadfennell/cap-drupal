@@ -200,7 +200,7 @@ namespace :drupal do
       'database' => 'your_database_1',
       'database_spare' => 'your_database_2',
     }
-    json = JSON.generate(db)
+    json = JSON.generate(db).gsub('"', '\"')
     run "echo #{json} > #{shared_path}/conf/db_settings_1.json"
     run "echo #{json} > #{shared_path}/conf/db_settings_2.json"
   end
