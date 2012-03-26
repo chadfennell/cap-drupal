@@ -12,8 +12,3 @@ set :use_sudo, false
 
 # Some configs live in JSON to make them portable between PHP and Ruby/Cap
 require 'json'
-
-_cset(:db_backup_files) { capture("ls -rX #{db_backup_dir}", :except => { :no_release => true }).split }
-_cset(:db_conf_dir) { File.join(shared_path, "conf") }
-_cset(:current_release_stamp) { current_release.split("/").pop }
-

@@ -17,16 +17,10 @@ after "deploy", "drupal:cacheclear"
 # stag stage
 after "deploy", "stage_tasks:cleanup"
 
-# Cleanup extra database dumps
-after "deploy:cleanup", "drupal:db_cleanup"
-
 after "deploy:setup", "drupal:setup"
 
 # Set group on all files added in the build process<D-0>
 before 'deploy:restart', 'drupal:set_group'
-
-# Call the core cap rollback 
-after "drupal:rollback", "deploy:rollback"
 
 # Override default Cap deploy task
 namespace :deploy do
@@ -42,19 +36,7 @@ namespace :drupal do
   task :finalize_update, :roles => :web, :except => { :no_release => true } do
     # Locate the make file and run it
     run "ls #{latest_release} | grep make" do |channel, stream, data|
-      run "cd #{latest_release}; #{drush} make --working-copy #{data} ."
-    end
-  end
-
-  # Rotate out old backups
-  # If you want to keep more/less, you can specify this like:
-  # cap staging deploy:cleanup -s keep_releases=10
-  task :db_cleanup, :roles => :db do
-    count_backups = db_backup_files.size
-    count_releases = count = fetch(:keep_releases, 5).to_i
-    old_backups = db_backup_files.slice(count_releases, count_backups)
-    if old_backups
-      old_backups.each { |file| run "rm #{db_backup_dir}/#{file};" }
+      run "cd #{latest_release}; #{drush} make #{make_args} #{data} ."
     end
   end
 
@@ -77,50 +59,7 @@ namespace :drupal do
     run "#{drush} cc all"
   end
 
-  # Safely runs update.php via drush.  Provides a fallback option via the
-  # db_refresh_hot_spare command.
-  task :updatedb, :roles => :web, :except => { :no_release => true } do
-    # Remove cache before dumping in order to minimize dump size
-    cacheclear
-    # Set active site to offline
-    offline 
-    # Take a snapshot of the live db
-    db_backup_live
-    # Sync this snapshot to the hot spare
-    db_refresh_hot_spare
-    # Ok, run update.php
-    run "#{drush} --verbose --yes updatedb"
-    response = Capistrano::CLI.ui.ask "Did the database update go according to plan (take a look at your website)? [Yes/No] (default is Yes) :"
-    response = response.empty? ? "Yes" : response
-    if response == "Yes"
-      online
-      cacheclear
-      logger.info "Groovy, taking the site out of maintenance mode."
-    else
-      logger.info "Awe Snap, reverting to the hot spare that was just created for you."
-      db_revert_to_spare
-    end
-  end
-
-  task :rollback, :roles => :web, :except => { :no_release => true } do 
-    db_revert_to_spare
-  end
-
-  # Roll back to the hot spare
-  # Don't call this unless you know what you are doing
-  task :db_revert_to_spare, :roles => :web do
-    # Set database and other settings to the web server
-    init_web_role_settings
-    spare = db_settings_live['database_spare']
-    run "cat #{shared_path}/conf/#{spare}" do |channel, stream, data|
-      time = Time.now.to_i
-      caplog('dblog.log', "#{time} \\| #{data}")
-    end
-    run "rm #{shared_path}/default/db_settings.json"
-    run "ln -s #{shared_path}/conf/#{spare} #{shared_path}/default/db_settings.json"
-  end
-
-  # Take site out of maintenance mode
+   # Take site out of maintenance mode
   task :online do
     run "#{drush} vset --yes site_offline 0"
     cacheclear
@@ -132,94 +71,11 @@ namespace :drupal do
     cacheclear
   end
 
-  # Show which of the two databases is live at the moment
-  task :db_live? do
-    run "cat #{shared_path}/default/db_settings.json" do |channel, stream, data|
-      creds = JSON.parse(data)
-      db_name = creds['database']
-      logger.info "Current Live Database for \"#{application}\" is \"#{db_name}\""
-    end
-  end
-
-  # Take an arbitrary snapshot of the db
-  task :db_backup_live, :roles => :db do
-    # Set database and other settings to the web server
-    init_web_role_settings
-    # Ensure this path exists
-    time = Time.now.to_i
-    # Set the current release from the web server
-    backup_file = "#{db_backup_dir}/#{current_release_stamp}_#{time}.sql"
-    db_user = db_settings_live['username']
-    db_pass = db_settings_live['pass']
-    db_name = db_settings_live['database']
-    run "mysqldump --user=#{db_user} --password=#{db_pass} #{db_name} > #{backup_file}"
-    # In case group bit not set on parent directory
-    run "chgrp #{group} #{backup_file}"
-  end
-
-  # Get the most recent backup for this release and import it into the 
-  # non-live spare database
-  task :db_refresh_hot_spare, :roles => :db do
-    # Set database and other settings to the web server
-    init_web_role_settings
-    latest_backup = db_backup_files[0]
-    if !latest_backup
-      abort "No backup file available for this release."
-    end
-    db_user = db_settings_spare['username']
-    db_pass = db_settings_spare['pass']
-    db_name = db_settings_spare['database']
-    run "mysql --user=#{db_user} --password=#{db_pass} --execute=\" DROP DATABASE #{db_name}\";"
-    run "mysql --user=#{db_user} --password=#{db_pass} --execute=\" CREATE DATABASE #{db_name}\";"
-    run "mysql --user=#{db_user} --password=#{db_pass} #{db_name} < #{db_backup_dir}/#{latest_backup}"
-  end
-
-  # We always want to get certain information from the web role
-  task :init_web_role_settings, :roles => :web do
-    # Database settings
-    run "cat #{shared_path}/default/db_settings.json" do |channel, stream, data|
-      puts info = JSON.parse(data)
-      _cset(:db_settings_live) { info }
-      db_spare = File.join(db_conf_dir, info["database_spare"])
-      run "cat #{db_spare}" do |channel, stream, data|
-         _cset(:db_settings_spare) { JSON.parse(data) }
-      end
-    end
-    # Get the current release from the web role
-    release = current_release
-    _cset(:current_release_stamp) { release.split("/").pop }
-  end
-
   # Setup tasks
   task :setup, :roles => :web do
+    # Place to stick custom .htaccess files and the like
     run "mkdir #{shared_path}/conf"
     run "mkdir #{shared_path}/default"
-    db = {
-      'username' => 'put_username_here',
-      'pass' => 'put_pass_here',
-      'database' => 'your_database_1',
-      'database_spare' => 'your_database_2',
-    }
-    json = JSON.generate(db).gsub('"', '\"')
-    run "echo #{json} > #{shared_path}/conf/db_settings_1.json"
-    run "echo #{json} > #{shared_path}/conf/db_settings_2.json"
   end
-
-  # Download the latest live db backup
-  task :download_db, :roles => :db do
-    init_web_role_settings
-    latest_backup = db_backup_files[0]
-    if !latest_backup
-      abort "No backup file available for this release."
-    end
-    download("#{db_backup_dir}/#{latest_backup}", "#{local_backup_dir}/$CAPISTRANO:HOST$_#{application}_#{latest_backup}")
-  end
-end
-
-# Simple helper function for basic logging
-def caplog(logfile, message)
-    log = "#{shared_path}/log/#{logfile}"
-    run "(test -e #{log} || touch #{log} && chmod 666 #{log}) && " +
-    "echo #{message} >> #{log};"
 end
 
