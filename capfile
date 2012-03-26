@@ -35,6 +35,7 @@ namespace :drupal do
 
   task :finalize_update, :roles => :web, :except => { :no_release => true } do
     # Locate the make file and run it
+    make_args = make_args ? make_args : ''
     run "ls #{latest_release} | grep make" do |channel, stream, data|
       run "cd #{latest_release}; #{drush} make #{make_args} #{data} ."
     end
