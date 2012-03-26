@@ -2,7 +2,7 @@ This cap script was inspired by the one listed here (contains a discussion of "w
 
 http://www.metaltoad.com/blog/capistrano-drupal-deployments-made-easy-part-1
 
-cap-drupal demonstrates a very simple single site example capistrano implementation for Drupal.
+"cap-drupal" demonstrates a very simple single site capistrano deployment script that uses Drush Make.
 
 Installation: 
 
