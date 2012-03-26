@@ -1,9 +1,8 @@
-This cap script was inspired by the one listed here: 
+This cap script was inspired by the one listed here (contains a discussion of "why use capistrano"): 
 
 http://www.metaltoad.com/blog/capistrano-drupal-deployments-made-easy-part-1
 
-Check out the above post for a good overview of the file directory layout for
-Capistrano multistage deployment.
+cap-drupal demonstrates a very simple single site example capistrano implementation for Drupal.
 
 Installation: 
 
