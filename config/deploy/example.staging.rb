@@ -13,7 +13,7 @@ set :scm_verbose,  true
 # deployments. So, because of this and because you shouldn't be directly 
 # editing production code, only pass working-copy to development environmnents.
 # I put it here in staging only for reference.
-set :make_args = '--working-copy'
+set :make_args, '--working-copy'
 
 #set the branch for the git repo of your make file (optional)
 set :branch, "6.x-1.x-whatever"
