@@ -17,10 +17,12 @@ after "deploy", "drupal:cacheclear"
 # stag stage
 after "deploy", "stage_tasks:cleanup"
 
+# Set group on all files added in the build process
+after "deploy", "drupal:set_group"
+
 after "deploy:setup", "drupal:setup"
 
-# Set group on all files added in the build process<D-0>
-before 'deploy:restart', 'drupal:set_group'
+
 
 # Override default Cap deploy task
 namespace :deploy do
