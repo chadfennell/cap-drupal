@@ -12,15 +12,36 @@ gem install capistrano
 gem install capistrano-ext
 gem install railsless-deploy
 
-2. Configure the environments.
+2. Create and Configure the environments.
 
-2.1 Copy config/deploy/example.staging.rb to:
+2.1 Download/clone cap-drupal.
 
-config/deploy/development.rb
-config/deploy/staging.rb
-config/deploy/production.rb
+git clone git://github.com/chadfennell/cap-drupal.git
 
-2.2 Edit the development.rb, staging.rb, and production.rb to reflect your server setup.
+2.2 Download/clone cap-drupal-example at the same directory level as cap-drupal.
+
+├── cap-drupal
+└── cap-drupal-example
+
+git clone git://github.com/chadfennell/cap-drupal-example.git
+
+├── capfile -> ../cap-drupal/capfile
+└── config
+    ├── deploy
+    │   ├── development.rb
+    │   ├── production.rb
+    │   └── staging.rb
+    └── deploy.rb -> ../../cap-drupal/config/deploy.rb
+
+
+2.3 Edit the development.rb, staging.rb, and production.rb to reflect your server setup.
+
+└── cap-drupal-example
+    └── config
+        ├── deploy
+        │   ├── development.rb <- Edit Me
+        │   ├── production.rb <- Edit Me
+        │   └── staging.rb <- Edit Me
 
 3. Create the app directory (the parent direcotry that holds your drupal code, file assets, configuration and other directories).
 
