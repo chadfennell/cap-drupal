@@ -38,12 +38,12 @@ namespace :drupal do
     # drupal_core is a specified version of Drupal to install. If it is present
     # we are not using Drush make and are managing core update with Drush.
     # Rather than building a make file, we check-out sites/all into current,
-    # move the symlink current to current_sites_all, symlink current to the 
+    # move the symlink current to current_sites_all, symlink current to the
     # specified core version, and create a symlink in the core sites/all that
     # points to the current_sites_all directory.
     drupal_core = fetch(:drupal_core, false)
     if drupal_core
-      # fetch the version of Drupal specified in drupal_core if we don't 
+      # fetch the version of Drupal specified in drupal_core if we don't
       # already have a local copy on-hand.
       refresh_core
     else
@@ -51,7 +51,7 @@ namespace :drupal do
       args = fetch(:make_args, "")
       run "ls #{latest_release} | grep make" do |channel, stream, data|
         run "cd #{latest_release}; #{drush} make #{args} #{data} ."
-      end      
+      end
     end
   end
 
@@ -59,13 +59,9 @@ namespace :drupal do
   task :symlink, :roles => :web, :except => { :no_release => true } do
     drupal_core = fetch(:drupal_core, false)
     if drupal_core
-      # Now remove the web root and link to the defined Drupal core
-      if remote_file_exists?("#{deploy_to}/webroot")
-        run "rm #{deploy_to}/webroot"
-      end
       # Link to the core directory for current
-      run "mv #{deploy_to}/current #{deploy_to}/current_sites_all"
-      run "cd #{deploy_to}; ln -s #{deploy_to}/releases_core/#{drupal_core} current"      
+      run "rm #{deploy_to}/current_sites_all; mv #{deploy_to}/current #{deploy_to}/current_sites_all"
+      run "cd #{deploy_to}; ln -s #{deploy_to}/releases_core/#{drupal_core} current"
     else
       run "ln -s #{shared_path}/default/files #{latest_release}/sites/default/files"
       run "ln -s #{shared_path}/default/settings.php #{latest_release}/sites/default/settings.php"
@@ -96,16 +92,16 @@ namespace :drupal do
     cacheclear
   end
 
-  # Checks to see if Drupal core version already exists on the file system. IF 
+  # Checks to see if Drupal core version already exists on the file system. IF
   # not, it downloads it with Drush. Removes everything from sites/ and replaces
   # with our own versions.
   task :refresh_core do
-    # Check to see if 
+    # Check to see if
     if !remote_file_exists?("#{deploy_to}/releases_core/#{drupal_core}")
       run "cd #{deploy_to}/releases_core; #{drush} dl drupal #{drupal_core} --no"
       run "rm -rf #{deploy_to}/releases_core/#{drupal_core}/sites/*"
-      run "cd #{deploy_to}/releases_core/#{drupal_core}/sites; ln -s #{shared_path}/default default" 
-      run "cd #{deploy_to}/releases_core/#{drupal_core}/sites; ln -s #{deploy_to}/current_sites_all all"      
+      run "cd #{deploy_to}/releases_core/#{drupal_core}/sites; ln -s #{shared_path}/default default"
+      run "cd #{deploy_to}/releases_core/#{drupal_core}/sites; ln -s #{deploy_to}/current_sites_all all"
     end
   end
 
@@ -114,18 +110,18 @@ namespace :drupal do
     run "mkdir #{shared_path}/conf"
     run "mkdir #{shared_path}/default"
     run "mkdir #{deploy_to}/releases_core"
-    run "rm -rf #{shared_path}/log"   
-    run "rm -rf #{shared_path}/public"       
+    run "rm -rf #{shared_path}/log"
+    run "rm -rf #{shared_path}/public"
     run "rm -rf #{shared_path}/tmp"
     releases_core = "Location of Drupal core releases. Internal use only."
     put releases_core, "#{deploy_to}/releases_core/README.txt"
     conf_readme = 'Use this directory to store local configurations and files like .htaccess.'
-    put conf_readme, "#{shared_path}/conf/README.txt"          
+    put conf_readme, "#{shared_path}/conf/README.txt"
   end
 end
 
 # convenience function to check if a remote file exists
 # Stolen from http://stackoverflow.com/a/1662001
-def remote_file_exists?(full_path) 
+def remote_file_exists?(full_path)
   'true' ==  capture("if [ -e #{full_path} ]; then echo 'true'; fi").strip
 end
